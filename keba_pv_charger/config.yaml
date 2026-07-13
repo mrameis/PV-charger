@@ -1,7 +1,7 @@
-name: "Keba PV-Überschussladen"
-version: "1.0.0"
+name: "Keba/go-eCharger PV-Überschussladen"
+version: "2.0.0"
 slug: "keba_pv_charger"
-description: "Regelt eine Keba KeContact P30c per Modbus TCP für PV-Überschussladen, inkl. eigenem Dashboard"
+description: "Regelt eine Keba KeContact oder go-eCharger Wallbox per PV-Überschuss, komplett im Interface konfigurierbar"
 arch:
   - amd64
   - aarch64
@@ -15,50 +15,6 @@ panel_title: PV-Laden
 map:
   - "data:rw"
 options:
-  keba_host: "192.168.0.50"
-  keba_port: 502
-  keba_unit_id: 255
-  shelly3em_host: "192.168.0.51"
-  shelly3em_generation: "gen1"
-  shelly3em_invert: false
-  fronius_enabled: true
-  fronius_host: "192.168.0.52"
-  steca_enabled: true
-  steca_host: "192.168.0.53"
-  steca_xml_path: ""
-  victron_enabled: true
-  victron_host: "192.168.0.54"
-  victron_port: 502
-  victron_unit_id: 100
-  charge_phases_mode: "auto"
-  charge_min_current_a: 6
-  charge_max_current_a: 16
-  grid_voltage: 230
-  control_interval_sec: 10
-  phase_switch_cooldown_sec: 300
-  decision_stability_sec: 60
   log_level: "info"
 schema:
-  keba_host: str
-  keba_port: port
-  keba_unit_id: int(0,255)
-  shelly3em_host: str
-  shelly3em_generation: list(gen1|gen2)
-  shelly3em_invert: bool
-  fronius_enabled: bool
-  fronius_host: str?
-  steca_enabled: bool
-  steca_host: str?
-  steca_xml_path: str?
-  victron_enabled: bool
-  victron_host: str?
-  victron_port: port
-  victron_unit_id: int(0,255)
-  charge_phases_mode: list(1|3|auto)
-  charge_min_current_a: int(1,32)
-  charge_max_current_a: int(1,32)
-  grid_voltage: int(200,250)
-  control_interval_sec: int(3,300)
-  phase_switch_cooldown_sec: int(0,3600)
-  decision_stability_sec: int(0,3600)
   log_level: list(debug|info|warn|error)
