@@ -31,6 +31,22 @@ export function openDb(dbPath: string): Database.Database {
       max_current_a REAL,
       notes TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS devices (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      category TEXT NOT NULL,
+      device_type TEXT NOT NULL,
+      name TEXT NOT NULL,
+      host TEXT NOT NULL,
+      port INTEGER,
+      unit_id INTEGER,
+      generation TEXT,
+      invert INTEGER,
+      xml_path TEXT,
+      active INTEGER NOT NULL DEFAULT 0,
+      enabled INTEGER NOT NULL DEFAULT 1
+    );
+    CREATE INDEX IF NOT EXISTS idx_devices_category ON devices(category);
   `);
 
   return db;

@@ -1,5 +1,5 @@
 name: "Keba/go-eCharger PV-Überschussladen"
-version: "2.0.0"
+version: "2.1.0"
 slug: "keba_pv_charger"
 description: "Regelt eine Keba KeContact oder go-eCharger Wallbox per PV-Überschuss, komplett im Interface konfigurierbar"
 arch:

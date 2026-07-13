@@ -6,26 +6,33 @@ const ctx = chartCanvas.getContext("2d");
 const wallboxSubtitle = document.getElementById("wallbox-subtitle");
 
 let currentMode = null;
-let currentSettings = null;
 let vehicles = [];
+let activeWallboxLabel = null;
 
 function fmtW(v) {
   if (v === null || v === undefined || Number.isNaN(v)) return "– W";
   return `${Math.round(v).toLocaleString("de-DE")} W`;
 }
 
-// --- Tabs ---
+// ============================== TABS ==============================
 document.getElementById("tabs").addEventListener("click", (e) => {
   const btn = e.target.closest(".tab-btn");
   if (!btn) return;
   document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b === btn));
-  document.querySelectorAll(".tab-panel").forEach((p) => {
-    p.classList.toggle("hidden", p.id !== `tab-${btn.dataset.tab}`);
-  });
-  if (btn.dataset.tab === "settings") loadSettingsIntoForms();
+  document.querySelectorAll(".tab-panel").forEach((p) => p.classList.toggle("hidden", p.id !== `tab-${btn.dataset.tab}`));
+  if (btn.dataset.tab === "settings") loadAllSettings();
 });
 
-// --- Lademodus ---
+document.getElementById("settings-subtabs").addEventListener("click", (e) => {
+  const btn = e.target.closest(".subtab-btn");
+  if (!btn) return;
+  document.querySelectorAll(".subtab-btn").forEach((b) => b.classList.toggle("active", b === btn));
+  document.querySelectorAll(".subtab-panel").forEach((p) =>
+    p.classList.toggle("hidden", p.id !== `settings-${btn.dataset.subtab}`)
+  );
+});
+
+// ============================== LADEMODUS ==============================
 function setActiveMode(mode) {
   currentMode = mode;
   [...modeSelect.children].forEach((btn) => btn.classList.toggle("active", btn.dataset.mode === mode));
@@ -35,27 +42,21 @@ modeSelect.addEventListener("click", async (e) => {
   const btn = e.target.closest("button[data-mode]");
   if (!btn) return;
   setActiveMode(btn.dataset.mode);
-  try {
-    await fetch("api/mode", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode: btn.dataset.mode }),
-    });
-  } catch (err) {
-    console.error("Moduswechsel fehlgeschlagen", err);
-  }
+  await fetch("api/mode", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode: btn.dataset.mode }),
+  }).catch((err) => console.error("Moduswechsel fehlgeschlagen", err));
 });
 
-// --- Energiefluss ---
+// ============================== DASHBOARD-ANZEIGE ==============================
 function updateFlow(snapshot) {
   const gridW = snapshot.grid?.gridPowerW ?? 0;
   const pvW = snapshot.pvTotalW;
   const evW = snapshot.wallbox?.activePowerW ?? 0;
-
   document.getElementById("val-pv").textContent = pvW !== null ? fmtW(pvW) : "n/v";
   document.getElementById("val-grid").textContent = `${gridW >= 0 ? "Bezug " : "Einspeisung "}${fmtW(Math.abs(gridW))}`;
   document.getElementById("val-ev").textContent = fmtW(evW);
-
   document.getElementById("path-pv-house").classList.toggle("active", (pvW ?? 0) > 50);
   document.getElementById("path-grid-house").classList.toggle("active", Math.abs(gridW) > 50);
   document.getElementById("path-house-ev").classList.toggle("active", evW > 50);
@@ -68,29 +69,37 @@ function updateStatus(snapshot) {
   document.getElementById("keba-current").textContent = `${snapshot.targetCurrentA} A`;
   document.getElementById("controller-note").textContent = snapshot.controllerNote;
   if (currentMode !== snapshot.mode) setActiveMode(snapshot.mode);
-
-  if (currentSettings) {
-    wallboxSubtitle.textContent =
-      currentSettings.wallboxType === "go_echarger" ? "go-eCharger · PV-Überschussladen" : "Keba KeContact · PV-Überschussladen";
-  }
+  wallboxSubtitle.textContent = activeWallboxLabel ? `${activeWallboxLabel} · PV-Überschussladen` : "PV-Überschussladen";
 }
 
 function updateSources(snapshot) {
   const list = document.getElementById("source-list");
   list.innerHTML = "";
   if (!snapshot.pvSources.length) {
-    list.innerHTML = '<li class="source-empty">Keine zusätzlichen PV-Quellen konfiguriert.</li>';
-    return;
+    list.innerHTML = '<li class="source-empty">Keine PV-Quellen konfiguriert (siehe Einstellungen).</li>';
+  } else {
+    for (const s of snapshot.pvSources) {
+      const li = document.createElement("li");
+      li.innerHTML = s.online
+        ? `<span>${s.name}</span><span class="source-value">${fmtW(s.powerW)}</span>`
+        : `<span>${s.name}</span><span class="source-offline">offline</span>`;
+      list.appendChild(li);
+    }
   }
-  for (const s of snapshot.pvSources) {
-    const li = document.createElement("li");
-    const extra = s.extra
-      ? Object.entries(s.extra).map(([k, v]) => `${k}: ${v ?? "–"}`).join(" · ")
-      : "";
-    li.innerHTML = s.online
-      ? `<span>${s.name}${extra ? " <small>(" + extra + ")</small>" : ""}</span><span class="source-value">${fmtW(s.powerW)}</span>`
-      : `<span>${s.name}</span><span class="source-offline">offline</span>`;
-    list.appendChild(li);
+
+  const batList = document.getElementById("battery-list");
+  batList.innerHTML = "";
+  if (!snapshot.batteries.length) {
+    batList.innerHTML = '<li class="source-empty">Keine Batterie konfiguriert.</li>';
+  } else {
+    for (const b of snapshot.batteries) {
+      const li = document.createElement("li");
+      const socTxt = b.socPercent !== null ? `${b.socPercent}%` : "–";
+      li.innerHTML = b.online
+        ? `<span>${b.name} <small>(${socTxt})</small></span><span class="source-value">${fmtW(b.powerW)}</span>`
+        : `<span>${b.name}</span><span class="source-offline">offline</span>`;
+      batList.appendChild(li);
+    }
   }
 }
 
@@ -121,14 +130,11 @@ function updateVehicleQuickpicks(snapshot) {
 }
 
 async function activateVehicle(id) {
-  if (id === null) {
-    await fetch("api/vehicles/deactivate", { method: "POST" });
-  } else {
-    await fetch(`api/vehicles/${id}/activate`, { method: "POST" });
-  }
+  if (id === null) await fetch("api/vehicles/deactivate", { method: "POST" });
+  else await fetch(`api/vehicles/${id}/activate`, { method: "POST" });
 }
 
-// --- Verlaufsdiagramm ---
+// ============================== VERLAUFSDIAGRAMM ==============================
 let history = [];
 
 function drawChart() {
@@ -148,7 +154,6 @@ function drawChart() {
   const maxV = Math.max(500, ...allVals.map((v) => Math.abs(v)));
   const minTs = history[0].ts;
   const maxTs = history[history.length - 1].ts;
-
   const x = (ts) => padding.left + ((ts - minTs) / Math.max(1, maxTs - minTs)) * plotW;
   const y = (v) => padding.top + plotH / 2 - (v / maxV) * (plotH / 2);
 
@@ -186,7 +191,261 @@ async function loadHistory() {
 }
 window.addEventListener("resize", drawChart);
 
-// --- Einstellungen ---
+// ============================== GERÄTEVERWALTUNG (EINSTELLUNGEN) ==============================
+const CATEGORY_TYPES = {
+  wallbox: [
+    ["keba", "Keba KeContact (Modbus TCP)"],
+    ["go_echarger", "go-eCharger (lokale HTTP API)"],
+  ],
+  grid_meter: [["shelly", "Shelly 3EM / Pro 3EM"]],
+  battery: [["victron", "Victron GX (Cerbo/Venus)"]],
+  pv_source: [
+    ["fronius", "Fronius Wechselrichter"],
+    ["steca", "StecaGrid (XML)"],
+    ["victron", "Victron (PV-gekoppelt)"],
+    ["shelly", "Shelly (Einzelmessung Wechselrichter)"],
+  ],
+};
+
+const FIELDS = {
+  keba: [
+    { name: "host", label: "IP-Adresse", type: "text", placeholder: "192.168.0.50" },
+    { name: "port", label: "Modbus-Port", type: "number", default: 502 },
+    { name: "unitId", label: "Modbus Unit-ID", type: "number", default: 255 },
+  ],
+  go_echarger: [{ name: "host", label: "IP-Adresse", type: "text", placeholder: "192.168.0.60" }],
+  shelly: [
+    { name: "host", label: "IP-Adresse", type: "text", placeholder: "192.168.0.51" },
+    {
+      name: "generation",
+      label: "Generation",
+      type: "select",
+      options: [
+        ["gen1", "Gen1 (klassisch)"],
+        ["gen2", "Gen2 (Pro, RPC)"],
+      ],
+      default: "gen1",
+    },
+  ],
+  victron: [
+    { name: "host", label: "IP-Adresse", type: "text", placeholder: "192.168.0.54" },
+    { name: "port", label: "Port", type: "number", default: 502 },
+    { name: "unitId", label: "Unit-ID", type: "number", default: 100 },
+  ],
+  fronius: [{ name: "host", label: "IP-Adresse", type: "text", placeholder: "192.168.0.52" }],
+  steca: [
+    { name: "host", label: "IP-Adresse", type: "text", placeholder: "192.168.0.53" },
+    { name: "xmlPath", label: "XML-Pfad (optional)", type: "text", placeholder: "/measurements.xml" },
+  ],
+};
+
+function fieldsFor(category, deviceType) {
+  const fields = [...(FIELDS[deviceType] || [])];
+  if (category === "grid_meter" && deviceType === "shelly") {
+    fields.push({ name: "invert", label: "Messrichtung invertieren", type: "checkbox" });
+  }
+  return fields;
+}
+
+async function loadCategory(category) {
+  const res = await fetch(`api/devices?category=${category}`);
+  const devices = await res.json();
+  if (category === "wallbox") {
+    const active = devices.find((d) => d.active);
+    activeWallboxLabel = active ? active.name : null;
+  }
+  renderDeviceList(category, devices);
+  renderAddArea(category, devices.length > 0);
+}
+
+function renderDeviceList(category, devices) {
+  const ul = document.querySelector(`[data-list="${category}"]`);
+  ul.innerHTML = "";
+  if (!devices.length) {
+    ul.innerHTML = '<li class="device-empty">Noch kein Gerät hinzugefügt.</li>';
+    return;
+  }
+  const singleActive = category === "wallbox" || category === "grid_meter";
+  for (const d of devices) {
+    const li = document.createElement("li");
+    li.className = "device-card" + (d.active ? " is-active" : "");
+    const typeLabel = (CATEGORY_TYPES[category].find(([v]) => v === d.deviceType) || [d.deviceType, d.deviceType])[1];
+    const metaParts = [typeLabel, d.host];
+    if (d.port) metaParts.push(`Port ${d.port}`);
+    if (d.generation) metaParts.push(d.generation);
+    const actionBtn = singleActive
+      ? `<button class="active-btn${d.active ? " is-active" : ""}" data-action="activate" data-id="${d.id}">${
+          d.active ? "Aktiv" : "Aktivieren"
+        }</button>`
+      : `<button class="toggle-btn${d.enabled ? "" : " is-off"}" data-action="toggle" data-id="${d.id}">${
+          d.enabled ? "Aktiviert" : "Deaktiviert"
+        }</button>`;
+    li.innerHTML = `
+      <div class="device-info">
+        <div class="device-name">${d.name}</div>
+        <div class="device-meta">${metaParts.join(" · ")}</div>
+      </div>
+      <div class="device-actions">
+        ${actionBtn}
+        <button class="danger" data-action="delete" data-id="${d.id}">Löschen</button>
+      </div>`;
+    ul.appendChild(li);
+  }
+  ul.onclick = async (e) => {
+    const btn = e.target.closest("button[data-action]");
+    if (!btn) return;
+    const id = Number(btn.dataset.id);
+    if (btn.dataset.action === "activate") {
+      await fetch(`api/devices/${id}/activate`, { method: "POST" });
+    } else if (btn.dataset.action === "toggle") {
+      const dev = devices.find((x) => x.id === id);
+      await fetch(`api/devices/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: !dev.enabled }),
+      });
+    } else if (btn.dataset.action === "delete") {
+      if (confirm("Gerät wirklich löschen?")) await fetch(`api/devices/${id}`, { method: "DELETE" });
+    }
+    loadCategory(category);
+  };
+}
+
+function renderAddArea(category, hasDevices) {
+  const container = document.querySelector(`[data-add="${category}"]`);
+  container.innerHTML = "";
+
+  const toggleBtn = document.createElement("button");
+  toggleBtn.className = "device-add-toggle";
+  toggleBtn.textContent = hasDevices ? "+ Weiteres Gerät hinzufügen" : "+ Gerät hinzufügen";
+
+  const formWrap = document.createElement("div");
+  formWrap.style.display = "none";
+  toggleBtn.onclick = () => {
+    formWrap.style.display = formWrap.style.display === "none" ? "block" : "none";
+  };
+
+  container.appendChild(toggleBtn);
+  container.appendChild(formWrap);
+  buildAddForm(category, formWrap);
+}
+
+function buildAddForm(category, formWrap) {
+  const types = CATEGORY_TYPES[category];
+  const form = document.createElement("form");
+  form.className = "device-add-form";
+
+  const typeSelect = document.createElement("select");
+  typeSelect.name = "deviceType";
+  for (const [value, label] of types) {
+    const opt = document.createElement("option");
+    opt.value = value;
+    opt.textContent = label;
+    typeSelect.appendChild(opt);
+  }
+  const typeLabel = document.createElement("label");
+  typeLabel.textContent = "Gerätetyp";
+  typeLabel.appendChild(typeSelect);
+
+  const nameInput = document.createElement("input");
+  nameInput.type = "text";
+  nameInput.name = "name";
+  nameInput.placeholder = "Anzeigename (optional)";
+  const nameLabel = document.createElement("label");
+  nameLabel.textContent = "Name";
+  nameLabel.appendChild(nameInput);
+
+  const dynamicRow = document.createElement("div");
+  dynamicRow.className = "field-row";
+
+  function renderDynamicFields() {
+    dynamicRow.innerHTML = "";
+    for (const f of fieldsFor(category, typeSelect.value)) {
+      const label = document.createElement("label");
+      if (f.type === "checkbox") {
+        label.className = "checkbox";
+        label.style.flexDirection = "row";
+        label.style.alignItems = "center";
+        label.style.textTransform = "none";
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.name = f.name;
+        label.appendChild(input);
+        label.append(" " + f.label);
+      } else if (f.type === "select") {
+        label.textContent = f.label;
+        const select = document.createElement("select");
+        select.name = f.name;
+        for (const [v, l] of f.options) {
+          const opt = document.createElement("option");
+          opt.value = v;
+          opt.textContent = l;
+          if (v === f.default) opt.selected = true;
+          select.appendChild(opt);
+        }
+        label.appendChild(select);
+      } else {
+        label.textContent = f.label;
+        const input = document.createElement("input");
+        input.type = f.type;
+        input.name = f.name;
+        if (f.placeholder) input.placeholder = f.placeholder;
+        if (f.default !== undefined) input.value = f.default;
+        label.appendChild(input);
+      }
+      dynamicRow.appendChild(label);
+    }
+  }
+  renderDynamicFields();
+  typeSelect.addEventListener("change", renderDynamicFields);
+
+  const actions = document.createElement("div");
+  actions.className = "form-actions";
+  const submitBtn = document.createElement("button");
+  submitBtn.type = "submit";
+  submitBtn.textContent = "Hinzufügen";
+  const cancelBtn = document.createElement("button");
+  cancelBtn.type = "button";
+  cancelBtn.className = "cancel-btn";
+  cancelBtn.textContent = "Abbrechen";
+  cancelBtn.onclick = () => {
+    formWrap.style.display = "none";
+  };
+  actions.appendChild(submitBtn);
+  actions.appendChild(cancelBtn);
+
+  form.appendChild(typeLabel);
+  form.appendChild(nameLabel);
+  form.appendChild(dynamicRow);
+  form.appendChild(actions);
+  formWrap.appendChild(form);
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const data = { category, deviceType: typeSelect.value, name: nameInput.value };
+    for (const el of form.elements) {
+      if (!el.name || el.name === "deviceType" || el.name === "name") continue;
+      if (el.type === "checkbox") data[el.name] = el.checked;
+      else if (el.type === "number") data[el.name] = el.value === "" ? null : Number(el.value);
+      else data[el.name] = el.value;
+    }
+    submitBtn.disabled = true;
+    try {
+      await fetch("api/devices", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      form.reset();
+      formWrap.style.display = "none";
+      await loadCategory(category);
+    } finally {
+      submitBtn.disabled = false;
+    }
+  });
+}
+
+// ============================== REGELPARAMETER ==============================
 function fillForm(form, data) {
   for (const el of form.elements) {
     if (!el.name || !(el.name in data)) continue;
@@ -194,7 +453,6 @@ function fillForm(form, data) {
     else el.value = data[el.name] ?? "";
   }
 }
-
 function readForm(form) {
   const out = {};
   for (const el of form.elements) {
@@ -206,59 +464,35 @@ function readForm(form) {
   return out;
 }
 
-function toggleKebaOnlyFields() {
-  const isKeba = document.querySelector('#form-wallbox [name="wallboxType"]').value === "keba";
-  document.querySelectorAll(".keba-only").forEach((el) => el.classList.toggle("hidden", !isKeba));
+async function loadControlSettings() {
+  const res = await fetch("api/settings");
+  const data = await res.json();
+  fillForm(document.getElementById("form-control"), data);
 }
 
-async function loadSettingsIntoForms() {
+document.getElementById("form-control").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const btn = e.target.querySelector("button");
+  btn.disabled = true;
+  btn.textContent = "Speichere…";
   try {
-    const res = await fetch("api/settings");
-    currentSettings = await res.json();
-    fillForm(document.getElementById("form-wallbox"), currentSettings);
-    fillForm(document.getElementById("form-shelly"), currentSettings);
-    fillForm(document.getElementById("form-control"), currentSettings);
-    fillForm(document.getElementById("form-sources"), currentSettings);
-    toggleKebaOnlyFields();
+    await fetch("api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(readForm(e.target)),
+    });
+    btn.textContent = "Gespeichert ✓";
   } catch (err) {
-    console.error("Einstellungen konnten nicht geladen werden", err);
+    btn.textContent = "Fehler!";
+    console.error(err);
   }
-}
-
-async function saveSettings(partial) {
-  const res = await fetch("api/settings", {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(partial),
-  });
-  currentSettings = await res.json();
-}
-
-document.getElementById("form-wallbox").addEventListener("change", (e) => {
-  if (e.target.name === "wallboxType") toggleKebaOnlyFields();
+  setTimeout(() => {
+    btn.textContent = "Speichern";
+    btn.disabled = false;
+  }, 1500);
 });
 
-for (const id of ["form-wallbox", "form-shelly", "form-control", "form-sources"]) {
-  document.getElementById(id).addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const btn = e.target.querySelector("button");
-    btn.disabled = true;
-    btn.textContent = "Speichere…";
-    try {
-      await saveSettings(readForm(e.target));
-      btn.textContent = "Gespeichert ✓";
-    } catch (err) {
-      btn.textContent = "Fehler!";
-      console.error(err);
-    }
-    setTimeout(() => {
-      btn.textContent = "Speichern";
-      btn.disabled = false;
-    }, 1500);
-  });
-}
-
-// --- Fahrzeuge ---
+// ============================== FAHRZEUGE ==============================
 async function loadVehicles() {
   const res = await fetch("api/vehicles");
   vehicles = await res.json();
@@ -272,20 +506,14 @@ function renderVehicleList() {
     list.innerHTML = '<li class="source-empty">Noch keine Fahrzeuge angelegt.</li>';
     return;
   }
-  const activeId = currentSnapshotActiveVehicleId();
+  const activeId = window.__lastSnapshot?.activeVehicle?.id ?? null;
   for (const v of vehicles) {
     const li = document.createElement("li");
-    const meta = [
-      v.minCurrentA !== null ? `min ${v.minCurrentA}A` : null,
-      v.maxCurrentA !== null ? `max ${v.maxCurrentA}A` : null,
-    ]
+    const meta = [v.minCurrentA !== null ? `min ${v.minCurrentA}A` : null, v.maxCurrentA !== null ? `max ${v.maxCurrentA}A` : null]
       .filter(Boolean)
       .join(" · ");
     li.innerHTML = `
-      <div>
-        <div>${v.name}</div>
-        <div class="vehicle-meta">${meta || "Standard-Limits"}</div>
-      </div>
+      <div><div>${v.name}</div><div class="vehicle-meta">${meta || "Standard-Limits"}</div></div>
       <div class="vehicle-actions">
         <button class="active-btn${activeId === v.id ? " is-active" : ""}" data-action="activate" data-id="${v.id}">${
       activeId === v.id ? "Aktiv" : "Aktivieren"
@@ -296,17 +524,12 @@ function renderVehicleList() {
   }
 }
 
-function currentSnapshotActiveVehicleId() {
-  return window.__lastSnapshot?.activeVehicle?.id ?? null;
-}
-
 document.getElementById("vehicle-list").addEventListener("click", async (e) => {
   const btn = e.target.closest("button[data-action]");
   if (!btn) return;
   const id = Number(btn.dataset.id);
-  if (btn.dataset.action === "activate") {
-    await activateVehicle(id);
-  } else if (btn.dataset.action === "delete") {
+  if (btn.dataset.action === "activate") await activateVehicle(id);
+  else if (btn.dataset.action === "delete") {
     if (confirm("Fahrzeug wirklich löschen?")) {
       await fetch(`api/vehicles/${id}`, { method: "DELETE" });
       await loadVehicles();
@@ -327,7 +550,19 @@ document.getElementById("form-add-vehicle").addEventListener("submit", async (e)
   await loadVehicles();
 });
 
-// --- WebSocket Live-Updates ---
+// ============================== EINSTELLUNGEN LADEN ==============================
+async function loadAllSettings() {
+  await Promise.all([
+    loadCategory("wallbox"),
+    loadCategory("grid_meter"),
+    loadCategory("battery"),
+    loadCategory("pv_source"),
+    loadControlSettings(),
+    loadVehicles(),
+  ]);
+}
+
+// ============================== WEBSOCKET ==============================
 function wsUrl() {
   const url = new URL("ws", window.location.href);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
@@ -355,7 +590,6 @@ function connect() {
     updateStatus(snapshot);
     updateSources(snapshot);
     updateVehicleQuickpicks(snapshot);
-    renderVehicleList();
 
     history.push({
       ts: snapshot.timestamp,
@@ -370,7 +604,7 @@ function connect() {
 }
 
 async function init() {
-  await Promise.all([loadHistory(), loadVehicles(), loadSettingsIntoForms()]);
+  await Promise.all([loadHistory(), loadVehicles(), loadCategory("wallbox")]);
   connect();
 }
 init();

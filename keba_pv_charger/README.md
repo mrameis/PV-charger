@@ -4,11 +4,20 @@ Home-Assistant-App (Node.js/TypeScript) mit eigenem Dashboard, die eine
 **Keba KeContact** (Modbus TCP) oder einen **go-eCharger** (lokale HTTP API)
 so regelt, dass möglichst nur PV-Überschuss zum Laden verwendet wird.
 
-**Ab Version 2.0 komplett im Interface konfigurierbar** (Reiter „Einstellungen"):
-Wallbox-Typ/IP, Netzzähler, optionale PV-Quellen, Regelparameter und beliebig
-viele **Fahrzeugprofile** (jeweils mit eigener Mindest-/Maximalladung) - kein
-Bearbeiten der HA-App-Konfiguration oder Neustart mehr nötig, Änderungen
-greifen sofort.
+**Ab Version 2.1: Geräteverwaltung statt fester Felder.** Im Reiter „Einstellungen"
+gibt es vier Kategorien - **Ladestation**, **Netzzähler**, **Batterie**,
+**Solar-Wechselrichter** - jeweils mit eigener Geräteliste. Pro Kategorie per
+„+ Gerät hinzufügen" beliebig viele Geräte anlegen (Dropdown zeigt die für diese
+Kategorie sinnvollen Typen). Bei Ladestation/Netzzähler ist immer genau ein Gerät
+„aktiv" (das steuert die Regelung), bei Batterie/Solar werden alle aktivierten
+Geräte gemeinsam angezeigt bzw. zur PV-Summe addiert.
+
+**Wichtig zu Shelly:** ein Shelly 3EM kann sowohl als **Netzzähler** (Bezug/
+Einspeisung am Hausanschluss, mit Vorzeichen) als auch als **Solar-Wechselrichter**
+-Messung (reine Erzeugungsmessung eines einzelnen Wechselrichters, ohne Vorzeichen)
+eingesetzt werden - je nachdem, in welcher Kategorie du ihn hinzufügst. Es kann
+z. B. ein Shelly als Netzzähler UND ein zweiter Shelly unter Solar-Wechselrichter
+(an einem einzelnen WR montiert) parallel laufen.
 
 ## Installation über dein GitHub-Repository
 
@@ -37,10 +46,10 @@ PV-charger/                    <- Repo-Root
 ### Migration von Version 1.x (Konfiguration über HA-Options-Tab)
 
 Falls du vorher schon `keba_host`/`shelly3em_host`/etc. im HA-Konfigurationstab
-gesetzt hattest: diese Werte werden beim ersten Start von 2.0 automatisch als
-Startkonfiguration übernommen (einmalige Migration in die neue SQLite-basierte
-Einstellungsverwaltung). Der HA-Konfigurationstab selbst hat danach nur noch
-das Feld `log_level` - alles andere passiert im Dashboard.
+gesetzt hattest: diese Werte werden beim ersten Start automatisch als
+Ladestation-/Netzzähler-/PV-Geräte in die neue Geräteverwaltung übernommen
+(einmalige Migration). Der HA-Konfigurationstab selbst hat danach nur noch
+das Feld `log_level` - alles andere passiert im Dashboard unter „Einstellungen".
 
 ### Alternative: lokale App ohne GitHub / eigenständig via docker-compose
 
@@ -125,8 +134,10 @@ Mindest-/Maximalstrom, alles andere (Modus, Phasenlogik) bleibt gleich.
 
 - `GET /api/status` – aktueller Snapshot (auch über WebSocket `/ws` live, `{type:"snapshot", data:...}`)
 - `GET /api/history?hours=24` – Verlaufsdaten für Charts
-- `GET /api/settings` / `PUT /api/settings` – aktuelle bzw. neue Einstellungen (Teilobjekt reicht)
+- `GET /api/settings` / `PUT /api/settings` – Regelparameter (Phasenmodus, Ströme, ...)
 - `POST /api/mode` – `{ "mode": "off" | "pv_only" | "min_plus_pv" | "fast" }`
+- `GET /api/devices?category=wallbox|grid_meter|battery|pv_source` – Geräteliste
+- `POST /api/devices`, `PUT/DELETE /api/devices/:id`, `POST /api/devices/:id/activate`
 - `GET/POST /api/vehicles`, `PUT/DELETE /api/vehicles/:id`
 - `POST /api/vehicles/:id/activate`, `POST /api/vehicles/deactivate`
 

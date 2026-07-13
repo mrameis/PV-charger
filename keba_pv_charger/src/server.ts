@@ -2,29 +2,39 @@ import express from "express";
 import http from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import path from "path";
-import { config, legacyOptionsAsSettings } from "./config";
+import { config, legacyMigration } from "./config";
 import { logger } from "./logger";
 import { openDb } from "./db/db";
 import { HistoryDb } from "./db/history";
 import { SettingsDb } from "./db/settingsDb";
 import { VehiclesDb } from "./db/vehiclesDb";
+import { DevicesDb } from "./db/devicesDb";
 import { PvSurplusController } from "./control/controller";
-import { ChargeMode } from "./types";
+import { ChargeMode, DeviceCategory } from "./types";
 
 const rawDb = openDb(config.server.dbPath);
 const historyDb = new HistoryDb(rawDb);
 const settingsDb = new SettingsDb(rawDb);
 const vehiclesDb = new VehiclesDb(rawDb);
+const devicesDb = new DevicesDb(rawDb);
 
-// Einmalige Migration: bestehende HA-Options aus der alten Version übernehmen,
-// falls die Einstellungen-DB noch leer ist.
-settingsDb.seedFromLegacyOptions(legacyOptionsAsSettings());
+// Einmalige Migration von Version 1.x (HA-Options) auf die geräte-basierte Verwaltung.
+if (devicesDb.list().length === 0) {
+  const migration = legacyMigration();
+  if (migration) {
+    settingsDb.seedFromLegacy(migration.controlSettings);
+    for (const d of migration.devices) devicesDb.create(d);
+    logger.info(`Legacy-Migration: ${migration.devices.length} Geräte aus alten Options übernommen`);
+  }
+}
 
-const controller = new PvSurplusController(historyDb, settingsDb, vehiclesDb);
+const controller = new PvSurplusController(historyDb, settingsDb, vehiclesDb, devicesDb);
 
 const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "..", "public")));
+
+const VALID_CATEGORIES: DeviceCategory[] = ["wallbox", "grid_meter", "battery", "pv_source"];
 
 app.get("/api/status", (_req, res) => {
   res.json(controller.getSnapshot());
@@ -58,6 +68,75 @@ app.post("/api/mode", (req, res) => {
   controller.setMode(mode);
   res.json({ ok: true, mode });
 });
+
+// --- Geräte (Ladestation / Netzzähler / Batterie / Solar-Wechselrichter) ---
+
+app.get("/api/devices", (req, res) => {
+  const category = req.query.category as DeviceCategory | undefined;
+  if (category && !VALID_CATEGORIES.includes(category)) {
+    res.status(400).json({ error: "Ungültige Kategorie" });
+    return;
+  }
+  res.json(devicesDb.list(category));
+});
+
+app.post("/api/devices", (req, res) => {
+  const body = req.body ?? {};
+  if (!VALID_CATEGORIES.includes(body.category)) {
+    res.status(400).json({ error: "Ungültige Kategorie" });
+    return;
+  }
+  if (!body.host || !body.deviceType) {
+    res.status(400).json({ error: "host und deviceType sind erforderlich" });
+    return;
+  }
+  const device = devicesDb.create({
+    category: body.category,
+    deviceType: body.deviceType,
+    name: body.name || body.deviceType,
+    host: body.host,
+    port: body.port ?? null,
+    unitId: body.unitId ?? null,
+    generation: body.generation ?? null,
+    invert: body.invert ?? null,
+    xmlPath: body.xmlPath ?? null,
+    active: !!body.active,
+    enabled: body.enabled !== false,
+  });
+  controller.reloadDevices();
+  res.json(device);
+});
+
+app.put("/api/devices/:id", (req, res) => {
+  const id = Number(req.params.id);
+  const updated = devicesDb.update(id, req.body ?? {});
+  if (!updated) {
+    res.status(404).json({ error: "Gerät nicht gefunden" });
+    return;
+  }
+  controller.reloadDevices();
+  res.json(updated);
+});
+
+app.delete("/api/devices/:id", (req, res) => {
+  const id = Number(req.params.id);
+  devicesDb.delete(id);
+  controller.reloadDevices();
+  res.json({ ok: true });
+});
+
+app.post("/api/devices/:id/activate", (req, res) => {
+  const device = devicesDb.get(Number(req.params.id));
+  if (!device) {
+    res.status(404).json({ error: "Gerät nicht gefunden" });
+    return;
+  }
+  devicesDb.setActive(device.category, device.id);
+  controller.reloadDevices();
+  res.json({ ok: true });
+});
+
+// --- Fahrzeuge ---
 
 app.get("/api/vehicles", (_req, res) => {
   res.json(vehiclesDb.list());

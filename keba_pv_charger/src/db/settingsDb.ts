@@ -1,28 +1,7 @@
 import Database from "better-sqlite3";
-import { AppSettings } from "../types";
+import { ControlSettings } from "../types";
 
-const DEFAULTS: AppSettings = {
-  wallboxType: "keba",
-  wallboxHost: "192.168.0.50",
-  wallboxPort: 502,
-  wallboxUnitId: 255,
-
-  shellyHost: "192.168.0.51",
-  shellyGeneration: "gen1",
-  shellyInvert: false,
-
-  froniusEnabled: false,
-  froniusHost: "",
-
-  stecaEnabled: false,
-  stecaHost: "",
-  stecaXmlPath: "",
-
-  victronEnabled: false,
-  victronHost: "",
-  victronPort: 502,
-  victronUnitId: 100,
-
+const DEFAULTS: ControlSettings = {
   phasesMode: "auto",
   minCurrentA: 6,
   maxCurrentA: 16,
@@ -30,7 +9,6 @@ const DEFAULTS: AppSettings = {
   intervalSec: 10,
   phaseSwitchCooldownSec: 300,
   decisionStabilitySec: 60,
-
   mode: "min_plus_pv",
   activeVehicleId: null,
 };
@@ -38,7 +16,7 @@ const DEFAULTS: AppSettings = {
 export class SettingsDb {
   constructor(private db: Database.Database) {}
 
-  get(): AppSettings {
+  get(): ControlSettings {
     const row = this.db.prepare(`SELECT data FROM settings WHERE id = 1`).get() as
       | { data: string }
       | undefined;
@@ -50,7 +28,7 @@ export class SettingsDb {
     }
   }
 
-  save(settings: AppSettings): void {
+  save(settings: ControlSettings): void {
     this.db
       .prepare(
         `INSERT INTO settings (id, data) VALUES (1, ?)
@@ -59,16 +37,15 @@ export class SettingsDb {
       .run(JSON.stringify(settings));
   }
 
-  update(partial: Partial<AppSettings>): AppSettings {
+  update(partial: Partial<ControlSettings>): ControlSettings {
     const merged = { ...this.get(), ...partial };
     this.save(merged);
     return merged;
   }
 
-  /** Einmalige Migration aus der alten HA-Options-basierten Version (falls vorhanden). */
-  seedFromLegacyOptions(legacy: Partial<AppSettings> | null): void {
+  seedFromLegacy(legacy: Partial<ControlSettings> | null): void {
     const row = this.db.prepare(`SELECT id FROM settings WHERE id = 1`).get();
-    if (row) return; // schon konfiguriert, nichts tun
+    if (row) return;
     this.save({ ...DEFAULTS, ...(legacy ?? {}) });
   }
 }
