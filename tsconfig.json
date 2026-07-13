@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Ladeleitstand · PV-Überschussladen</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <div>
+          <h1>Ladeleitstand</h1>
+          <p class="subtitle" id="wallbox-subtitle">PV-Überschussladen</p>
+        </div>
+      </div>
+      <nav class="tabs" id="tabs">
+        <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
+        <button class="tab-btn" data-tab="settings">Einstellungen</button>
+      </nav>
+      <div class="conn" id="conn">
+        <span class="conn-dot" id="conn-dot"></span>
+        <span id="conn-text">verbinde…</span>
+      </div>
+    </header>
+
+    <!-- ===================== DASHBOARD ===================== -->
+    <main class="grid tab-panel" id="tab-dashboard">
+      <section class="panel flow-panel">
+        <h2 class="panel-title">Energiefluss</h2>
+        <svg id="flow" viewBox="0 0 720 260" class="flow-svg" role="img" aria-label="Energiefluss zwischen PV, Netz, Haus und Ladestation">
+          <defs>
+            <marker id="arrow-pv" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 Z" fill="var(--amber)"/>
+            </marker>
+            <marker id="arrow-grid" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 Z" fill="var(--red)"/>
+            </marker>
+            <marker id="arrow-ev" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8 Z" fill="var(--teal)"/>
+            </marker>
+          </defs>
+          <path id="path-pv-house" class="flow-line pv" d="M120,60 C260,60 260,130 360,130" marker-end="url(#arrow-pv)"/>
+          <path id="path-grid-house" class="flow-line grid" d="M120,200 C260,200 260,130 360,130" marker-end="url(#arrow-grid)"/>
+          <path id="path-house-ev" class="flow-line ev" d="M400,130 C520,130 520,130 600,130" marker-end="url(#arrow-ev)"/>
+          <g class="node" transform="translate(60,60)"><circle r="34"/><text class="node-icon" y="6">☀</text></g>
+          <text class="node-label" x="60" y="20">PV-Erzeugung</text>
+          <text class="node-value" id="val-pv" x="60" y="98">– W</text>
+          <g class="node" transform="translate(60,200)"><circle r="34"/><text class="node-icon" y="6">⇅</text></g>
+          <text class="node-label" x="60" y="160">Netz</text>
+          <text class="node-value" id="val-grid" x="60" y="238">– W</text>
+          <g class="node hub" transform="translate(380,130)"><circle r="38"/><text class="node-icon" y="6">⌂</text></g>
+          <text class="node-label" x="380" y="90">Haus</text>
+          <g class="node" transform="translate(650,130)"><circle r="34"/><text class="node-icon" y="6">⚡</text></g>
+          <text class="node-label" x="650" y="90">Wallbox</text>
+          <text class="node-value" id="val-ev" x="650" y="168">– W</text>
+        </svg>
+        <p class="controller-note" id="controller-note">–</p>
+      </section>
+
+      <section class="panel">
+        <h2 class="panel-title">Ladesteuerung</h2>
+        <div class="status-row">
+          <div><span class="status-label">Status</span><span class="status-value" id="keba-state">–</span></div>
+          <div><span class="status-label">Phasen</span><span class="status-value" id="keba-phases">–</span></div>
+          <div><span class="status-label">Strom</span><span class="status-value mono" id="keba-current">– A</span></div>
+        </div>
+        <div class="mode-select" id="mode-select">
+          <button data-mode="off">Aus</button>
+          <button data-mode="pv_only">Nur PV</button>
+          <button data-mode="min_plus_pv">Min + PV</button>
+          <button data-mode="fast">Schnell</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-title-row">
+          <h2 class="panel-title">Fahrzeug</h2>
+        </div>
+        <ul class="source-list" id="vehicle-quickpicks">
+          <li class="source-empty">Lade…</li>
+        </ul>
+      </section>
+
+      <section class="panel">
+        <h2 class="panel-title">PV-Quellen</h2>
+        <ul class="source-list" id="source-list">
+          <li class="source-empty">Lade Daten…</li>
+        </ul>
+      </section>
+
+      <section class="panel chart-panel">
+        <div class="chart-header">
+          <h2 class="panel-title">Verlauf (24 h)</h2>
+          <div class="legend">
+            <span><i class="dot amber"></i>PV</span>
+            <span><i class="dot red"></i>Netz</span>
+            <span><i class="dot teal"></i>Laden</span>
+          </div>
+        </div>
+        <canvas id="chart" height="220"></canvas>
+      </section>
+    </main>
+
+    <!-- ===================== EINSTELLUNGEN ===================== -->
+    <main class="grid tab-panel hidden" id="tab-settings">
+      <section class="panel">
+        <h2 class="panel-title">Wallbox</h2>
+        <form id="form-wallbox" class="settings-form">
+          <label>Typ
+            <select name="wallboxType">
+              <option value="keba">Keba KeContact (Modbus TCP)</option>
+              <option value="go_echarger">go-eCharger (lokale HTTP API)</option>
+            </select>
+          </label>
+          <label>IP-Adresse <input type="text" name="wallboxHost" placeholder="192.168.0.50" /></label>
+          <label class="keba-only">Modbus-Port <input type="number" name="wallboxPort" /></label>
+          <label class="keba-only">Modbus Unit-ID <input type="number" name="wallboxUnitId" /></label>
+          <button type="submit">Speichern</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2 class="panel-title">Netzzähler (Shelly 3EM)</h2>
+        <form id="form-shelly" class="settings-form">
+          <label>IP-Adresse <input type="text" name="shellyHost" placeholder="192.168.0.51" /></label>
+          <label>Generation
+            <select name="shellyGeneration">
+              <option value="gen1">Gen1 (klassisch)</option>
+              <option value="gen2">Gen2 (Pro 3EM, RPC)</option>
+            </select>
+          </label>
+          <label class="checkbox"><input type="checkbox" name="shellyInvert" /> Messrichtung invertieren</label>
+          <button type="submit">Speichern</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2 class="panel-title">Regelparameter</h2>
+        <form id="form-control" class="settings-form">
+          <label>Phasenmodus
+            <select name="phasesMode">
+              <option value="auto">Automatisch</option>
+              <option value="1">Fest 1-phasig</option>
+              <option value="3">Fest 3-phasig</option>
+            </select>
+          </label>
+          <label>Mindeststrom (A) <input type="number" name="minCurrentA" min="1" max="32" /></label>
+          <label>Maximalstrom (A) <input type="number" name="maxCurrentA" min="1" max="32" /></label>
+          <label>Netzspannung (V) <input type="number" name="gridVoltage" /></label>
+          <label>Regelintervall (s) <input type="number" name="intervalSec" /></label>
+          <label>Phasenumschalt-Cooldown (s) <input type="number" name="phaseSwitchCooldownSec" /></label>
+          <label>Entscheidungs-Stabilität (s) <input type="number" name="decisionStabilitySec" /></label>
+          <button type="submit">Speichern</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2 class="panel-title">Zusätzliche PV-Quellen</h2>
+        <form id="form-sources" class="settings-form">
+          <fieldset>
+            <legend><label class="checkbox"><input type="checkbox" name="froniusEnabled" /> Fronius</label></legend>
+            <input type="text" name="froniusHost" placeholder="IP-Adresse" />
+          </fieldset>
+          <fieldset>
+            <legend><label class="checkbox"><input type="checkbox" name="stecaEnabled" /> StecaGrid</label></legend>
+            <input type="text" name="stecaHost" placeholder="IP-Adresse" />
+            <input type="text" name="stecaXmlPath" placeholder="/measurements.xml (optional)" />
+          </fieldset>
+          <fieldset>
+            <legend><label class="checkbox"><input type="checkbox" name="victronEnabled" /> Victron GX</label></legend>
+            <input type="text" name="victronHost" placeholder="IP-Adresse" />
+            <input type="number" name="victronPort" placeholder="Port (502)" />
+            <input type="number" name="victronUnitId" placeholder="Unit-ID (100)" />
+          </fieldset>
+          <button type="submit">Speichern</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2 class="panel-title">Fahrzeuge</h2>
+        <ul class="vehicle-list" id="vehicle-list"></ul>
+        <form id="form-add-vehicle" class="settings-form inline">
+          <input type="text" name="name" placeholder="Name (z.B. Model 3)" required />
+          <input type="number" name="minCurrentA" placeholder="Min A (optional)" />
+          <input type="number" name="maxCurrentA" placeholder="Max A (optional)" />
+          <button type="submit">Hinzufügen</button>
+        </form>
+      </section>
+    </main>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
