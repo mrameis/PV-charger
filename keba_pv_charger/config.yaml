@@ -1,0 +1,20 @@
+name: "Keba/go-eCharger PV-Überschussladen"
+version: "3.1.0"
+slug: "keba_pv_charger"
+description: "Regelt eine Keba KeContact oder go-eCharger Wallbox per PV-Überschuss, komplett im Interface konfigurierbar"
+arch:
+  - amd64
+  - aarch64
+init: false
+startup: application
+boot: auto
+ingress: true
+ingress_port: 8080
+panel_icon: mdi:car-electric-outline
+panel_title: PV-Laden
+map:
+  - "data:rw"
+options:
+  log_level: "info"
+schema:
+  log_level: list(debug|info|warn|error)
