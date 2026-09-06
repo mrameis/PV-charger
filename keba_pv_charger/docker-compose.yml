@@ -1,0 +1,13 @@
+services:
+  keba-pv-charger:
+    build: .
+    container_name: keba-pv-charger
+    restart: unless-stopped
+    # Bridge-Netzwerk reicht aus: der Container ruft Keba/Shelly/Fronius/Steca/Victron
+    # per fester LAN-IP auf (kein mDNS/Broadcast nötig). Passend zu deinem bestehenden
+    # Setup (nginx reverse proxy -> Container-Port), analog zu nzbdav/Usenet Ultimate.
+    ports:
+      - "8080:8080"
+    env_file: .env
+    volumes:
+      - ./data:/data
